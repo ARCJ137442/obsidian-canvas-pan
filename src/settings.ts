@@ -1,6 +1,6 @@
 import type { CanvasKeyboardPan, CanvasKeyboardPanSettings } from "./plugin";
 import { DEFAULT_SETTINGS, Direction } from "./plugin";
-import { PluginSettingTab, Setting, setIcon } from "obsidian";
+import { Notice, PluginSettingTab, Setting, setIcon } from "obsidian";
 
 import type { App } from "obsidian";
 
@@ -13,6 +13,7 @@ const KeyLabelOverrides: Record<string, string> = {
 
 export class CanvasKeyboardPanSettingsTab extends PluginSettingTab {
 	keySettingsListener: ((evt: KeyboardEvent) => void) | null = null;
+	keySettingsDocument: Document | null = null;
 	activeDirection: Direction | null = null;
 	keys: Partial<CanvasKeyboardPanSettings["keys"]> = {};
 
@@ -24,6 +25,7 @@ export class CanvasKeyboardPanSettingsTab extends PluginSettingTab {
 	}
 
 	public display() {
+		this.stopKeyCapture();
 		this.containerEl.empty();
 		const keyboardViewContainer = this.containerEl.createDiv();
 		keyboardViewContainer.appendChild(this.renderKeyboardView(this.plugin.settings.keys, null));
@@ -42,16 +44,18 @@ export class CanvasKeyboardPanSettingsTab extends PluginSettingTab {
 			.addButton((button) => {
 				button.setButtonText("Update controls");
 				button.onClick(() => {
+					this.stopKeyCapture();
 					this.activeDirection = Direction.North;
 					this.keys = {};
 					keyboardViewContainer.empty();
 					keyboardViewContainer.appendChild(this.renderKeyboardView(this.keys, this.activeDirection));
 					const listener = ((evt: KeyboardEvent) => {
-						if (this.activeDirection === null) {
+						if (this.activeDirection === null || evt.repeat || evt.ctrlKey || evt.altKey || evt.metaKey
+							|| evt.code === "ShiftLeft" || evt.code === "ShiftRight") {
 							return;
 						}
 
-						this.keys[this.activeDirection] = evt.key;
+						this.keys[this.activeDirection] = evt.code;
 						switch (this.activeDirection) {
 							case Direction.North:
 								this.activeDirection = Direction.West;
@@ -71,7 +75,8 @@ export class CanvasKeyboardPanSettingsTab extends PluginSettingTab {
 						keyboardViewContainer.appendChild(this.renderKeyboardView(this.keys, this.activeDirection));
 					}).bind(this);
 					this.keySettingsListener = listener;
-					this.plugin.registerDomEvent(document, "keydown", listener);
+					this.keySettingsDocument = this.containerEl.ownerDocument;
+					this.keySettingsDocument.addEventListener("keydown", listener);
 				});
 			});
 
@@ -104,16 +109,34 @@ export class CanvasKeyboardPanSettingsTab extends PluginSettingTab {
 		if (!keys[Direction.North] || !keys[Direction.West] || !keys[Direction.South] || !keys[Direction.East]) {
 			return;
 		}
+		const values = [keys[Direction.North], keys[Direction.West], keys[Direction.South], keys[Direction.East]];
+		if (new Set(values.map((value) => value.toLowerCase())).size !== values.length) {
+			new Notice("Canvas Keyboard Pan：四个方向键不能重复");
+			this.stopKeyCapture();
+			this.display();
+			return;
+		}
 		this.plugin.settings = {
 			...this.plugin.settings,
 			keys: { ...(keys as Required<CanvasKeyboardPanSettings["keys"]>) },
 		};
 		await this.plugin.saveData(this.plugin.settings);
-		if (this.keySettingsListener) {
-			document.removeEventListener("keydown", this.keySettingsListener);
-			this.keySettingsListener = null;
-		}
+		this.stopKeyCapture();
 		this.display();
+	}
+
+	public hide(): void {
+		this.stopKeyCapture();
+		super.hide();
+	}
+
+	private stopKeyCapture(): void {
+		if (this.keySettingsListener && this.keySettingsDocument) {
+			this.keySettingsDocument.removeEventListener("keydown", this.keySettingsListener);
+		}
+		this.keySettingsListener = null;
+		this.keySettingsDocument = null;
+		this.activeDirection = null;
 	}
 
 	public renderKeyboardView(
@@ -165,6 +188,9 @@ export class CanvasKeyboardPanSettingsTab extends PluginSettingTab {
 
 	public getKeyLabel(keys: Partial<CanvasKeyboardPanSettings["keys"]>, direction: Direction): string {
 		const key = keys[direction] ?? "?";
-		return KeyLabelOverrides[key] ?? key;
+		if (KeyLabelOverrides[key]) return KeyLabelOverrides[key];
+		if (key.startsWith("Key") && key.length === 4) return key.slice(3);
+		if (key.startsWith("Digit")) return key.slice(5);
+		return key;
 	}
 }

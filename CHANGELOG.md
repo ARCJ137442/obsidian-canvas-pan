@@ -16,6 +16,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- ## Unreleased -->
 
+## [1.0.7] - 2026-08-21
+
+### Fixed
+
+- Keyboard listeners now attach to each Canvas window's owning document, keeping WASD usable after restart and in popout windows.
+- Focus and workspace changes reset only the affected window instead of clearing or invalidating unrelated Canvas windows.
+- Keyboard bindings are stored as physical `KeyboardEvent.code` values, with legacy single-letter settings migrated automatically.
+- The control-capture listener is now installed once per update session and removed exactly, so one captured key cannot populate all four directions.
+- Invalid or duplicate persisted bindings are rejected and restored to default WASD with a notice.
+- Focus cleanup no longer runs on every focus event; only blur and hidden-document transitions stop active panning, avoiding cancellation immediately after a Canvas receives focus.
+- Viewport mutations now call Canvas `requestFrame()` after `markViewportChanged()`, ensuring the visual Canvas renderer observes keyboard panning.
+- Directional WASD propagation is coordinated with the companion whiteboard plugin so node navigation and viewport panning can receive the same event.
+- Concrete targets outside a Canvas are no longer guessed as the only Canvas in that window.
+
 ## [1.0.6] - 2026-08-21
 
 ### Fixed

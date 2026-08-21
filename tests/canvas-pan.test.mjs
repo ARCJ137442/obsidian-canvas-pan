@@ -4,12 +4,16 @@ import context from "../.test-build/canvas-context.js"
 import guardModule from "../.test-build/keyboard-event-guard.js"
 import modifierModule from "../.test-build/keyboard-modifiers.js"
 import registryModule from "../.test-build/window-registration.js"
+import keyBindingsModule from "../.test-build/key-bindings.js"
+import viewportModule from "../.test-build/canvas-viewport.js"
 import util from "../.test-build/util.js"
 
 const { getCanvasFromEvent, isCanvasEditing, isEditableTarget } = context
 const { KeyboardEventGuard } = guardModule
 const { hasKeyboardModifier } = modifierModule
 const { WindowRegistrationRegistry } = registryModule
+const { DEFAULT_KEY_BINDINGS, normalizeKeyBindings } = keyBindingsModule
+const { panCanvas } = viewportModule
 const { xor } = util
 
 test("从事件所在的 Canvas DOM 解析上下文，而不是猜 active view", () => {
@@ -69,6 +73,25 @@ test("窗口级键盘事件只回退到同一窗口的唯一 Canvas", () => {
 	assert.equal(getCanvasFromEvent(app, event), undefined)
 })
 
+test("具体元素在 Canvas 外部时不回退到同窗口的唯一 Canvas", () => {
+	const documentA = {}
+	const windowA = { document: documentA }
+	documentA.defaultView = windowA
+	const canvasRoot = { ownerDocument: documentA, contains: target => target === canvasRoot }
+	const outsideTarget = { ownerDocument: documentA, nodeType: 1 }
+	const canvas = { name: "A" }
+	const app = {
+		workspace: {
+			iterateAllLeaves(callback) {
+				callback({ view: { containerEl: canvasRoot, canvas, getViewType: () => "canvas" } })
+			},
+		},
+	}
+
+	assert.equal(getCanvasFromEvent(app, { target: outsideTarget, composedPath: () => [outsideTarget] }, windowA), undefined)
+	assert.equal(getCanvasFromEvent(app, { target: canvasRoot, composedPath: () => [canvasRoot] }, windowA), canvas)
+})
+
 test("同一个 KeyboardEvent 只消费一次，避免独立窗口双重触发", () => {
 	const guard = new KeyboardEventGuard()
 	const event = {}
@@ -119,4 +142,34 @@ test("方向冲突与速度函数保持原有语义", () => {
 	assert.equal(xor(true, true), false)
 	assert.equal(xor(false, false), false)
 	assert.equal(Math.min((Math.log10(1000) * 250) / 3, 250), 250)
+})
+
+test("键位配置按顺序归一化，旧单字母可迁移，重复键会恢复默认", () => {
+	assert.deepEqual(normalizeKeyBindings({ north: "w", west: "a", south: "s", east: "d" }), {
+		keys: DEFAULT_KEY_BINDINGS,
+		repaired: false,
+	})
+	assert.deepEqual(normalizeKeyBindings({ north: "d", west: "d", south: "d", east: "d" }), {
+		keys: DEFAULT_KEY_BINDINGS,
+		repaired: true,
+	})
+	assert.deepEqual(normalizeKeyBindings({ north: "", west: "KeyA", south: "KeyS", east: "KeyD" }), {
+		keys: DEFAULT_KEY_BINDINGS,
+		repaired: true,
+	})
+})
+
+test("Canvas 视口变更契约包含显式 requestFrame 重绘", () => {
+	const calls = []
+	const canvas = {
+		tx: 10,
+		ty: 20,
+		zoom: 0,
+		markViewportChanged: () => calls.push("markViewportChanged"),
+		requestFrame: () => calls.push("requestFrame"),
+	}
+	panCanvas(canvas, 12, -6)
+	assert.equal(canvas.tx, 12.4)
+	assert.equal(canvas.ty, 18.8)
+	assert.deepEqual(calls, ["markViewportChanged", "requestFrame"])
 })

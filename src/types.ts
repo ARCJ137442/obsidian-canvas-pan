@@ -7,6 +7,7 @@ export interface Canvas {
 	zoom: number;
 	selection?: Set<{ isEditing?: boolean }>;
 	markViewportChanged: () => void;
+	requestFrame?: () => void;
 	panTo: (x: number, y: number) => void;
 }
 

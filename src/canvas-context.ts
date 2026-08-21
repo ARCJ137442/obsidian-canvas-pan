@@ -25,6 +25,15 @@ export function getCanvasFromEvent(app: App, event: Event, eventWindow?: Window)
 	if (directCanvas) return directCanvas;
 	if (!eventWindow) return undefined;
 
+	// A keyboard event from a note, modal, menu, or another application surface
+	// must not be guessed as belonging to the only Canvas in the window. The
+	// fallback below is only safe for Window/Document-level events, where there
+	// is no concrete element target to disambiguate.
+	if (targets.some((target) => isElementTarget(target)
+		&& !candidates.some((candidate) => isInsideContainer(candidate.container, target)))) {
+		return undefined;
+	}
+
 	const windowCandidates = candidates.filter(candidate => candidate.container.ownerDocument.defaultView === eventWindow);
 	if (windowCandidates.length === 1) return windowCandidates[0].canvas;
 
@@ -35,6 +44,10 @@ export function getCanvasFromEvent(app: App, event: Event, eventWindow?: Window)
 	const activeLeafView = app.workspace.activeLeaf?.view as CanvasViewLike | null | undefined;
 	const activeLeafCandidate = windowCandidates.find(candidate => candidate.view === activeLeafView);
 	return activeLeafCandidate?.canvas;
+}
+
+function isElementTarget(target: unknown): target is Element {
+	return Boolean(target && (target as { nodeType?: number }).nodeType === 1);
 }
 
 function getEventTargets(event: Event): unknown[] {

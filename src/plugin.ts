@@ -1,4 +1,4 @@
-import { ItemView, Plugin } from "obsidian";
+import { ItemView, Notice, Plugin } from "obsidian";
 
 import type { Canvas } from "./types";
 import { CanvasKeyboardPanSettingsTab } from "./settings";
@@ -7,6 +7,8 @@ import { KeyboardEventGuard } from "./keyboard-event-guard";
 import { WindowRegistrationRegistry } from "./window-registration";
 import { hasKeyboardModifier } from "./keyboard-modifiers";
 import { xor } from "./util";
+import { DEFAULT_KEY_BINDINGS, normalizeKeyBindings } from "./key-bindings";
+import { panCanvas } from "./canvas-viewport";
 
 export enum Direction {
 	North = "north",
@@ -21,12 +23,7 @@ export interface CanvasKeyboardPanSettings {
 }
 
 export const DEFAULT_SETTINGS: CanvasKeyboardPanSettings = {
-	keys: {
-		[Direction.North]: "w",
-		[Direction.West]: "a",
-		[Direction.South]: "s",
-		[Direction.East]: "d",
-	},
+	keys: { ...DEFAULT_KEY_BINDINGS },
 	maxSpeed: 250,
 };
 
@@ -34,6 +31,7 @@ interface PanWindowState {
 	canvas?: Canvas;
 	panStart: number | null;
 	panInterval?: number;
+	debugFirstTickLogged: boolean;
 	keyDown: Record<Direction, boolean>;
 }
 
@@ -43,6 +41,7 @@ type WindowWithPanCleanup = Window & {
 };
 
 const PAN_INTERVAL_MS = 10;
+const DIAGNOSTIC_LOGGING = true;
 
 export class CanvasKeyboardPan extends Plugin {
 	settings: CanvasKeyboardPanSettings = {
@@ -57,20 +56,34 @@ export class CanvasKeyboardPan extends Plugin {
 
 	async onload() {
 		const data = (await this.loadData()) as Partial<CanvasKeyboardPanSettings> | null;
-		if (data) {
-			this.settings = {
-				...DEFAULT_SETTINGS,
-				...data,
-				keys: { ...DEFAULT_SETTINGS.keys, ...(data.keys ?? {}) },
-			};
+		const loadedKeys = normalizeKeyBindings(data?.keys);
+		this.settings = {
+			...DEFAULT_SETTINGS,
+			maxSpeed: typeof data?.maxSpeed === "number" && Number.isFinite(data.maxSpeed)
+				? data.maxSpeed
+				: DEFAULT_SETTINGS.maxSpeed,
+			keys: loadedKeys.keys as Record<Direction, string>,
+		};
+		this.log("settings-loaded", { settings: this.settings, repaired: loadedKeys.repaired });
+		if (loadedKeys.repaired) {
+			console.warn("[CanvasKeyboardPan] invalid or duplicate key bindings detected; restoring default WASD", data?.keys);
+			await this.saveData(this.settings);
+			new Notice("Canvas Keyboard Pan：检测到重复按键配置，已恢复默认 WASD");
 		}
 		this.addSettingTab(new CanvasKeyboardPanSettingsTab(this.app, this));
 		this.registerCanvasKeyListeners();
 
 		this.registerEvent(this.app.workspace.on("layout-change", () => this.stopAllPan(true)));
-		for (const event of ["active-leaf-change", "file-open", "file-menu", "files-menu"] as const) {
-			this.registerEvent(this.app.workspace.on(event as never, () => this.stopAllPan(true)));
-		}
+		this.registerEvent(this.app.workspace.on("active-leaf-change" as never, ((leaf: unknown, previousLeaf: unknown) => {
+			const currentWindow = this.getWindowFromLeaf(leaf);
+			const previousWindow = this.getWindowFromLeaf(previousLeaf);
+			if (currentWindow) this.stopPan(currentWindow, true);
+			if (previousWindow && previousWindow !== currentWindow) this.stopPan(previousWindow, true);
+		}) as never));
+		this.registerEvent(this.app.workspace.on("file-open" as never, ((_file: unknown, view: unknown) => {
+			const eventWindow = this.getWindowFromView(view);
+			if (eventWindow) this.stopPan(eventWindow, true);
+		}) as never));
 	}
 
 	onunload(): void {
@@ -84,6 +97,7 @@ export class CanvasKeyboardPan extends Plugin {
 	private createWindowState(): PanWindowState {
 		return {
 			panStart: null,
+			debugFirstTickLogged: false,
 			keyDown: {
 				[Direction.North]: false,
 				[Direction.West]: false,
@@ -95,69 +109,116 @@ export class CanvasKeyboardPan extends Plugin {
 
 	private registerCanvasKeyListeners(): void {
 		const registerForWindow = (eventWindow: Window | null): void => {
-			if (!eventWindow || !this.registeredWindows.claim(eventWindow)) return;
+			if (!eventWindow) return;
+			if (!this.registeredWindows.claim(eventWindow)) {
+				this.log("register-window-skipped-duplicate", this.describeWindow(eventWindow));
+				return;
+			}
 
 			const windowWithCleanup = eventWindow as WindowWithPanCleanup;
 			windowWithCleanup.__obsidianCanvasKeyboardPanCleanup?.();
 
 			const state = this.createWindowState();
 			this.windowStates.set(eventWindow, state);
+			this.log("register-window", this.describeWindow(eventWindow));
 
 			const onKeyDown = (event: KeyboardEvent): void => {
+				this.log("keydown", {
+					window: this.describeWindow(eventWindow), key: event.key, code: event.code,
+					shift: event.shiftKey, ctrl: event.ctrlKey, alt: event.altKey, meta: event.metaKey,
+					repeat: event.repeat, target: this.describeTarget(event.target),
+				});
 				if (hasKeyboardModifier(event)) {
+					this.log("keydown-blocked-modifier", { window: this.describeWindow(eventWindow), key: event.key, code: event.code });
 					this.stopPan(eventWindow, true);
 					return;
 				}
-				if (event.repeat || event.isComposing || isEditableTarget(event.target)) return;
+				if (event.repeat || event.isComposing || isEditableTarget(event.target)) {
+					this.log("keydown-blocked-input-state", { repeat: event.repeat, composing: event.isComposing, editable: isEditableTarget(event.target) });
+					return;
+				}
 
 				const canvas = getCanvasFromEvent(this.app, event, eventWindow);
-				if (!canvas || isCanvasEditing(canvas) || !this.handledKeyboardEvents.consume(event)) return;
+				if (!canvas) {
+					this.log("keydown-ignored-no-canvas", { window: this.describeWindow(eventWindow) });
+					return;
+				}
+				if (isCanvasEditing(canvas)) {
+					this.log("keydown-blocked-canvas-editing", { window: this.describeWindow(eventWindow) });
+					return;
+				}
+				if (!this.handledKeyboardEvents.consume(event)) {
+					this.log("keydown-ignored-duplicate-event", { window: this.describeWindow(eventWindow) });
+					return;
+				}
 
-				const direction = this.getDirectionForKey(event.key);
-				if (!direction) return;
+				const direction = this.getDirectionForEvent(event);
+				if (!direction) {
+					this.log("keydown-ignored-unbound-key", { key: event.key, code: event.code, configured: this.settings.keys });
+					return;
+				}
 
 				state.canvas = canvas;
 				state.keyDown[direction] = true;
 				state.keyDown[this.getOppositeDirection(direction)] = false;
 				this.startPan(eventWindow);
+				this.log("keydown-accepted", { window: this.describeWindow(eventWindow), direction, configured: this.settings.keys[direction] });
 				event.preventDefault();
-				event.stopImmediatePropagation();
 		};
 
 			const onKeyUp = (event: KeyboardEvent): void => {
+				this.log("keyup", {
+					window: this.describeWindow(eventWindow), key: event.key, code: event.code,
+					shift: event.shiftKey, ctrl: event.ctrlKey, alt: event.altKey, meta: event.metaKey,
+				});
 				if (hasKeyboardModifier(event)) {
+					this.log("keyup-blocked-modifier", { window: this.describeWindow(eventWindow), key: event.key, code: event.code });
 					this.stopPan(eventWindow, true);
 					return;
 				}
-				if (!this.handledKeyboardEvents.consume(event)) return;
+				if (!this.handledKeyboardEvents.consume(event)) {
+					this.log("keyup-ignored-duplicate-event", { window: this.describeWindow(eventWindow) });
+					return;
+				}
 
-				const direction = this.getDirectionForKey(event.key);
-				if (!direction) return;
+				const direction = this.getDirectionForEvent(event);
+				if (!direction) {
+					this.log("keyup-ignored-unbound-key", { key: event.key, code: event.code, configured: this.settings.keys });
+					return;
+				}
 				state.keyDown[direction] = false;
 				this.stopPan(eventWindow);
 		};
 
-			const clearWindowState = () => this.resetWindowState(eventWindow);
-			const onVisibilityChange = (): void => {
-				if (eventWindow.document.visibilityState !== "visible") clearWindowState();
+			const clearWindowState = (reason: string): void => {
+				this.log("clear-window-state", { reason, window: this.describeWindow(eventWindow) });
+				this.resetWindowState(eventWindow);
 			};
-			eventWindow.addEventListener("keydown", onKeyDown, true);
-			eventWindow.addEventListener("keyup", onKeyUp, true);
-			eventWindow.addEventListener("blur", clearWindowState);
+			const onBlur = (): void => clearWindowState("blur");
+			const onVisibilityChange = (): void => {
+				if (eventWindow.document.visibilityState !== "visible") clearWindowState(`visibility:${eventWindow.document.visibilityState}`);
+			};
+			// Register on the owning document: Obsidian popouts can expose a
+			// Window wrapper whose event path is not identical to the document
+			// receiving the physical keyboard event.
+			eventWindow.document.addEventListener("keydown", onKeyDown, true);
+			eventWindow.document.addEventListener("keyup", onKeyUp, true);
+			eventWindow.addEventListener("blur", onBlur);
 			eventWindow.document.addEventListener("visibilitychange", onVisibilityChange);
 
 			let cleaned = false;
 			const cleanup: WindowCleanup = () => {
 				if (cleaned) return;
 				cleaned = true;
-				eventWindow.removeEventListener("keydown", onKeyDown, true);
-				eventWindow.removeEventListener("keyup", onKeyUp, true);
-				eventWindow.removeEventListener("blur", clearWindowState);
+				eventWindow.document.removeEventListener("keydown", onKeyDown, true);
+				eventWindow.document.removeEventListener("keyup", onKeyUp, true);
+				eventWindow.removeEventListener("blur", onBlur);
 				eventWindow.document.removeEventListener("visibilitychange", onVisibilityChange);
 				if (windowWithCleanup.__obsidianCanvasKeyboardPanCleanup === cleanup) {
 					delete windowWithCleanup.__obsidianCanvasKeyboardPanCleanup;
 				}
 				this.windowCleanups.delete(eventWindow);
+				this.log("cleanup-window", this.describeWindow(eventWindow));
 				this.removeWindowState(eventWindow);
 				this.registeredWindows.release(eventWindow);
 			};
@@ -173,18 +234,60 @@ export class CanvasKeyboardPan extends Plugin {
 		});
 
 		this.registerEvent(this.app.workspace.on("window-open", (_workspaceWindow, eventWindow) => {
+			this.log("workspace-window-open", this.describeWindow(eventWindow));
 			registerForWindow(eventWindow);
 		}));
 		this.registerEvent(this.app.workspace.on("window-close", (_workspaceWindow, eventWindow) => {
+			this.log("workspace-window-close", this.describeWindow(eventWindow));
 			this.windowCleanups.get(eventWindow)?.();
 		}));
 	}
 
-	private getDirectionForKey(key: string): Direction | undefined {
+	private getDirectionForEvent(event: KeyboardEvent): Direction | undefined {
 		for (const direction of Object.values(Direction)) {
-			if (this.settings.keys[direction] === key) return direction;
+			const configuredKey = this.settings.keys[direction];
+			if (configuredKey === event.code || configuredKey.toLowerCase() === event.key.toLowerCase()) {
+				return direction;
+			}
 		}
 		return undefined;
+	}
+
+	private describeWindow(eventWindow: Window): Record<string, unknown> {
+		return {
+			main: eventWindow === this.getWorkspaceWindow(),
+			url: eventWindow.location?.href,
+			visibility: eventWindow.document.visibilityState,
+			focused: eventWindow.document.hasFocus?.(),
+		};
+	}
+
+	private describeTarget(target: EventTarget | null): string {
+		if (!target) return "null";
+		const element = target as Element;
+		return element.tagName ? `${element.tagName.toLowerCase()}${element.className ? `.${String(element.className).replace(/\s+/g, ".")}` : ""}` : target.constructor?.name ?? "unknown";
+	}
+
+	private log(message: string, details?: unknown): void {
+		if (DIAGNOSTIC_LOGGING) {
+			let serialized = "";
+			try {
+				serialized = details === undefined ? "" : ` ${JSON.stringify(details)}`;
+			} catch {
+				serialized = " [unserializable-details]";
+			}
+			console.info(`[CanvasKeyboardPan] ${message}${serialized}`);
+		}
+	}
+
+	private getWindowFromLeaf(leaf: unknown): Window | undefined {
+		const view = (leaf as { view?: unknown } | null | undefined)?.view ?? leaf;
+		return this.getWindowFromView(view);
+	}
+
+	private getWindowFromView(view: unknown): Window | undefined {
+		const containerEl = (view as { containerEl?: HTMLElement } | null | undefined)?.containerEl;
+		return containerEl?.ownerDocument.defaultView ?? undefined;
 	}
 
 	private getOppositeDirection(direction: Direction): Direction {
@@ -218,21 +321,33 @@ export class CanvasKeyboardPan extends Plugin {
 
 	public startPan(eventWindow: Window = this.getWorkspaceWindow()): void {
 		const state = this.windowStates.get(eventWindow);
-		if (!state || state.panInterval !== undefined) return;
+		if (!state) {
+			this.log("start-pan-skipped-no-window-state", this.describeWindow(eventWindow));
+			return;
+		}
+		if (state.panInterval !== undefined) {
+			this.log("start-pan-skipped-already-running", this.describeWindow(eventWindow));
+			return;
+		}
 
 		state.panStart = Date.now();
+		state.debugFirstTickLogged = false;
 		const interval = eventWindow.setInterval(() => this.handlePanKeys(eventWindow), PAN_INTERVAL_MS);
 		state.panInterval = this.registerInterval(interval);
+		this.log("start-pan", { window: this.describeWindow(eventWindow), interval: state.panInterval });
 	}
 
 	public stopPan(eventWindow: Window = this.getWorkspaceWindow(), force = false): void {
 		const state = this.windowStates.get(eventWindow);
 		if (!state) return;
 
+		const wasRunning = state.panInterval !== undefined;
 		if (force || !this.isPanning(state)) {
 			if (state.panInterval !== undefined) eventWindow.clearInterval(state.panInterval);
 			state.panInterval = undefined;
 			state.panStart = null;
+			state.debugFirstTickLogged = false;
+			if (wasRunning) this.log("stop-pan", { window: this.describeWindow(eventWindow), force });
 		}
 		if (force) {
 			for (const direction of Object.values(Direction)) state.keyDown[direction] = false;
@@ -288,17 +403,22 @@ export class CanvasKeyboardPan extends Plugin {
 			dx += this.getPanDistance(ms, this.settings.maxSpeed);
 		}
 
+		const before = { tx: canvas.tx, ty: canvas.ty };
 		this.pan(dx, dy, canvas);
+		if (!state.debugFirstTickLogged) {
+			state.debugFirstTickLogged = true;
+			const runtimeCanvas = canvas as Canvas & { viewportChanged?: boolean; frame?: number };
+			this.log("pan-first-tick", {
+				window: this.describeWindow(eventWindow), direction: { dx, dy },
+				before, after: { tx: canvas.tx, ty: canvas.ty },
+				viewportChanged: runtimeCanvas.viewportChanged, frame: runtimeCanvas.frame,
+			});
+		}
 	}
 
 	public pan(dx: number, dy: number, canvas = this.getActiveCanvas()): void {
 		if (!canvas) return;
-		const zoom = (canvas.zoom ?? -4) + 5;
-		canvas.tx += dx / zoom;
-		canvas.ty += dy / zoom;
-		if (isNaN(canvas.tx)) canvas.tx = 0;
-		if (isNaN(canvas.ty)) canvas.ty = 0;
-		canvas.markViewportChanged();
+		panCanvas(canvas, dx, dy);
 	}
 
 	public getPanDistance(msPanning = 0, max = 250): number {
