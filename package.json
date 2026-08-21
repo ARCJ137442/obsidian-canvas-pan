@@ -1,11 +1,12 @@
 {
 	"name": "canvas-keyboard-pan",
-	"version": "1.0.1",
+	"version": "1.0.2",
 	"description": "Pan around your canvas using the keyboard",
 	"main": "main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
 		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+		"test": "tsc -p tests/tsconfig.json && node --test tests/canvas-pan.test.mjs",
 		"version": "node version-bump.mjs"
 	},
 	"keywords": [],

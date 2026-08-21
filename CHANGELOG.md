@@ -16,6 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- ## Unreleased -->
 
+## [1.0.2] - 2026-08-21
+
+### Fixed
+
+- Keyboard panning now resolves the Canvas belonging to the active main or popout window.
+- Duplicate listener paths no longer process the same keyboard event twice.
+- Panning state is cleared when a window loses focus or closes.
+- Keyboard panning does not steal input from editable controls or Canvas text editing.
+
 ## [1.0.1] - 2024-05-18
 
 ### Fixed
