@@ -16,6 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- ## Unreleased -->
 
+## [1.0.6] - 2026-08-21
+
+### Fixed
+
+- Modifier keys (`Ctrl`, `Shift`, `Alt`, and `Meta`) now stop active panning.
+- Key combinations such as `Ctrl+S` no longer trigger or continue keyboard panning.
+
 ## [1.0.5] - 2026-08-21
 
 ### Fixed

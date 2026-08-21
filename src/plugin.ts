@@ -5,6 +5,7 @@ import { CanvasKeyboardPanSettingsTab } from "./settings";
 import { getCanvasFromEvent, isCanvasEditing, isEditableTarget } from "./canvas-context";
 import { KeyboardEventGuard } from "./keyboard-event-guard";
 import { WindowRegistrationRegistry } from "./window-registration";
+import { hasKeyboardModifier } from "./keyboard-modifiers";
 import { xor } from "./util";
 
 export enum Direction {
@@ -103,6 +104,10 @@ export class CanvasKeyboardPan extends Plugin {
 			this.windowStates.set(eventWindow, state);
 
 			const onKeyDown = (event: KeyboardEvent): void => {
+				if (hasKeyboardModifier(event)) {
+					this.stopPan(eventWindow, true);
+					return;
+				}
 				if (event.repeat || event.isComposing || isEditableTarget(event.target)) return;
 
 				const canvas = getCanvasFromEvent(this.app, event, eventWindow);
@@ -120,6 +125,10 @@ export class CanvasKeyboardPan extends Plugin {
 		};
 
 			const onKeyUp = (event: KeyboardEvent): void => {
+				if (hasKeyboardModifier(event)) {
+					this.stopPan(eventWindow, true);
+					return;
+				}
 				if (!this.handledKeyboardEvents.consume(event)) return;
 
 				const direction = this.getDirectionForKey(event.key);

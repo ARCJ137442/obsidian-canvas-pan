@@ -12,6 +12,7 @@
 	"include": [
 		"../src/canvas-context.ts",
 		"../src/keyboard-event-guard.ts",
+		"../src/keyboard-modifiers.ts",
 		"../src/window-registration.ts",
 		"../src/util.ts",
 		"../src/types.ts"
