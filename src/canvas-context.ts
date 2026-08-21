@@ -8,20 +8,33 @@ type CanvasViewLike = {
 };
 
 /** Resolve the Canvas that owns the keyboard event's DOM tree. */
-export function getCanvasFromEvent(app: App, event: Event): Canvas | undefined {
+export function getCanvasFromEvent(app: App, event: Event, eventWindow?: Window): Canvas | undefined {
 	const targets = getEventTargets(event);
-	let result: Canvas | undefined;
+	const candidates: Array<{ canvas: Canvas; container: HTMLElement; view: CanvasViewLike }> = [];
+	let directCanvas: Canvas | undefined;
 
 	app.workspace.iterateAllLeaves((leaf) => {
-		if (result) return;
 		const view = leaf.view as CanvasViewLike | null;
 		if (!view || view.getViewType?.() !== "canvas" || !view.canvas || !view.containerEl) return;
+		candidates.push({ canvas: view.canvas, container: view.containerEl, view });
 		if (targets.some((target) => isInsideContainer(view.containerEl!, target))) {
-			result = view.canvas;
+			directCanvas = view.canvas;
 		}
 	});
 
-	return result;
+	if (directCanvas) return directCanvas;
+	if (!eventWindow) return undefined;
+
+	const windowCandidates = candidates.filter(candidate => candidate.container.ownerDocument.defaultView === eventWindow);
+	if (windowCandidates.length === 1) return windowCandidates[0].canvas;
+
+	const activeElement = eventWindow.document.activeElement;
+	const activeCandidate = windowCandidates.find(candidate => isInsideContainer(candidate.container, activeElement));
+	if (activeCandidate) return activeCandidate.canvas;
+
+	const activeLeafView = app.workspace.activeLeaf?.view as CanvasViewLike | null | undefined;
+	const activeLeafCandidate = windowCandidates.find(candidate => candidate.view === activeLeafView);
+	return activeLeafCandidate?.canvas;
 }
 
 function getEventTargets(event: Event): unknown[] {

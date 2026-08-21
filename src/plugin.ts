@@ -4,6 +4,7 @@ import type { Canvas } from "./types";
 import { CanvasKeyboardPanSettingsTab } from "./settings";
 import { getCanvasFromEvent, isCanvasEditing, isEditableTarget } from "./canvas-context";
 import { KeyboardEventGuard } from "./keyboard-event-guard";
+import { WindowRegistrationRegistry } from "./window-registration";
 import { xor } from "./util";
 
 export enum Direction {
@@ -35,6 +36,11 @@ interface PanWindowState {
 	keyDown: Record<Direction, boolean>;
 }
 
+type WindowCleanup = () => void;
+type WindowWithPanCleanup = Window & {
+	__obsidianCanvasKeyboardPanCleanup?: WindowCleanup;
+};
+
 const PAN_INTERVAL_MS = 10;
 
 export class CanvasKeyboardPan extends Plugin {
@@ -44,7 +50,8 @@ export class CanvasKeyboardPan extends Plugin {
 	};
 
 	private readonly windowStates = new Map<Window, PanWindowState>();
-	private readonly registeredWindows = new WeakSet<Window>();
+	private readonly registeredWindows = new WindowRegistrationRegistry<Window>();
+	private readonly windowCleanups = new Map<Window, WindowCleanup>();
 	private readonly handledKeyboardEvents = new KeyboardEventGuard();
 
 	async onload() {
@@ -67,7 +74,10 @@ export class CanvasKeyboardPan extends Plugin {
 
 	onunload(): void {
 		this.stopAllPan(true);
+		for (const cleanup of [...this.windowCleanups.values()]) cleanup();
+		this.windowCleanups.clear();
 		this.windowStates.clear();
+		this.registeredWindows.clear();
 	}
 
 	private createWindowState(): PanWindowState {
@@ -84,16 +94,18 @@ export class CanvasKeyboardPan extends Plugin {
 
 	private registerCanvasKeyListeners(): void {
 		const registerForWindow = (eventWindow: Window | null): void => {
-			if (!eventWindow || this.registeredWindows.has(eventWindow)) return;
+			if (!eventWindow || !this.registeredWindows.claim(eventWindow)) return;
 
-			this.registeredWindows.add(eventWindow);
+			const windowWithCleanup = eventWindow as WindowWithPanCleanup;
+			windowWithCleanup.__obsidianCanvasKeyboardPanCleanup?.();
+
 			const state = this.createWindowState();
 			this.windowStates.set(eventWindow, state);
 
-			this.registerDomEvent(eventWindow, "keydown", (event: KeyboardEvent) => {
+			const onKeyDown = (event: KeyboardEvent): void => {
 				if (event.repeat || event.isComposing || isEditableTarget(event.target)) return;
 
-				const canvas = getCanvasFromEvent(this.app, event);
+				const canvas = getCanvasFromEvent(this.app, event, eventWindow);
 				if (!canvas || isCanvasEditing(canvas) || !this.handledKeyboardEvents.consume(event)) return;
 
 				const direction = this.getDirectionForKey(event.key);
@@ -104,22 +116,45 @@ export class CanvasKeyboardPan extends Plugin {
 				state.keyDown[this.getOppositeDirection(direction)] = false;
 				this.startPan(eventWindow);
 				event.preventDefault();
-			});
+				event.stopImmediatePropagation();
+		};
 
-			this.registerDomEvent(eventWindow, "keyup", (event: KeyboardEvent) => {
+			const onKeyUp = (event: KeyboardEvent): void => {
 				if (!this.handledKeyboardEvents.consume(event)) return;
 
 				const direction = this.getDirectionForKey(event.key);
 				if (!direction) return;
 				state.keyDown[direction] = false;
 				this.stopPan(eventWindow);
-			});
+		};
 
-			const clearWindowState = () => this.clearWindowState(eventWindow);
-			this.registerDomEvent(eventWindow, "blur", clearWindowState);
-			this.registerDomEvent(eventWindow.document, "visibilitychange", () => {
+			const clearWindowState = () => this.resetWindowState(eventWindow);
+			const onVisibilityChange = (): void => {
 				if (eventWindow.document.visibilityState !== "visible") clearWindowState();
-			});
+			};
+			eventWindow.addEventListener("keydown", onKeyDown, true);
+			eventWindow.addEventListener("keyup", onKeyUp, true);
+			eventWindow.addEventListener("blur", clearWindowState);
+			eventWindow.document.addEventListener("visibilitychange", onVisibilityChange);
+
+			let cleaned = false;
+			const cleanup: WindowCleanup = () => {
+				if (cleaned) return;
+				cleaned = true;
+				eventWindow.removeEventListener("keydown", onKeyDown, true);
+				eventWindow.removeEventListener("keyup", onKeyUp, true);
+				eventWindow.removeEventListener("blur", clearWindowState);
+				eventWindow.document.removeEventListener("visibilitychange", onVisibilityChange);
+				if (windowWithCleanup.__obsidianCanvasKeyboardPanCleanup === cleanup) {
+					delete windowWithCleanup.__obsidianCanvasKeyboardPanCleanup;
+				}
+				this.windowCleanups.delete(eventWindow);
+				this.removeWindowState(eventWindow);
+				this.registeredWindows.release(eventWindow);
+			};
+			windowWithCleanup.__obsidianCanvasKeyboardPanCleanup = cleanup;
+			this.windowCleanups.set(eventWindow, cleanup);
+			this.register(cleanup);
 		};
 
 		const workspaceDocument = this.app.workspace.containerEl.ownerDocument;
@@ -132,7 +167,7 @@ export class CanvasKeyboardPan extends Plugin {
 			registerForWindow(eventWindow);
 		}));
 		this.registerEvent(this.app.workspace.on("window-close", (_workspaceWindow, eventWindow) => {
-			this.clearWindowState(eventWindow);
+			this.windowCleanups.get(eventWindow)?.();
 		}));
 	}
 
@@ -157,10 +192,14 @@ export class CanvasKeyboardPan extends Plugin {
 			|| xor(state.keyDown[Direction.North], state.keyDown[Direction.South]);
 	}
 
-	private clearWindowState(eventWindow: Window): void {
+	private resetWindowState(eventWindow: Window): void {
 		const state = this.windowStates.get(eventWindow);
 		if (!state) return;
 		this.stopPan(eventWindow, true);
+	}
+
+	private removeWindowState(eventWindow: Window): void {
+		this.resetWindowState(eventWindow);
 		this.windowStates.delete(eventWindow);
 	}
 

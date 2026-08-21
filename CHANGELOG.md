@@ -16,6 +16,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- ## Unreleased -->
 
+## [1.0.5] - 2026-08-21
+
+### Fixed
+
+- Window blur and document visibility changes now reset active panning without deleting the window registration state.
+- Main and popout windows remain usable after focus changes and Vault/plugin reloads.
+
+## [1.0.4] - 2026-08-21
+
+### Fixed
+
+- Main-window and popout-window keyboard events now use the same Canvas context resolution path.
+- A window-level keyboard event falls back only to a Canvas in its own window, preserving multi-window isolation.
+- Listener cleanup is explicit, preventing stale reload listeners from causing duplicate panning.
+
+## [1.0.3] - 2026-08-21
+
+### Fixed
+
+- Window listener registration is reset during plugin unload, so reloading the plugin restores keyboard panning in every window.
+- Repeated reloads no longer leave the registration guard out of sync with the active window states.
+
 ## [1.0.2] - 2026-08-21
 
 ### Fixed
