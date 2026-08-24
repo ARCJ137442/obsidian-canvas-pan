@@ -9,6 +9,7 @@ import { hasKeyboardModifier } from "./keyboard-modifiers";
 import { xor } from "./util";
 import { DEFAULT_KEY_BINDINGS, normalizeKeyBindings } from "./key-bindings";
 import { panCanvas } from "./canvas-viewport";
+import { DEFAULT_PAN_SPEED, getPanDistance, normalizePanSpeed } from "./pan-speed";
 
 export enum Direction {
 	North = "north",
@@ -24,14 +25,13 @@ export interface CanvasKeyboardPanSettings {
 
 export const DEFAULT_SETTINGS: CanvasKeyboardPanSettings = {
 	keys: { ...DEFAULT_KEY_BINDINGS },
-	maxSpeed: 250,
+	maxSpeed: DEFAULT_PAN_SPEED,
 };
 
 interface PanWindowState {
 	canvas?: Canvas;
 	panStart: number | null;
 	panInterval?: number;
-	debugFirstTickLogged: boolean;
 	keyDown: Record<Direction, boolean>;
 }
 
@@ -41,7 +41,6 @@ type WindowWithPanCleanup = Window & {
 };
 
 const PAN_INTERVAL_MS = 10;
-const DIAGNOSTIC_LOGGING = true;
 
 export class CanvasKeyboardPan extends Plugin {
 	settings: CanvasKeyboardPanSettings = {
@@ -57,18 +56,20 @@ export class CanvasKeyboardPan extends Plugin {
 	async onload() {
 		const data = (await this.loadData()) as Partial<CanvasKeyboardPanSettings> | null;
 		const loadedKeys = normalizeKeyBindings(data?.keys);
+		const loadedMaxSpeed = normalizePanSpeed(data?.maxSpeed);
+		const speedRepaired = loadedMaxSpeed !== data?.maxSpeed;
 		this.settings = {
 			...DEFAULT_SETTINGS,
-			maxSpeed: typeof data?.maxSpeed === "number" && Number.isFinite(data.maxSpeed)
-				? data.maxSpeed
-				: DEFAULT_SETTINGS.maxSpeed,
+			maxSpeed: loadedMaxSpeed,
 			keys: loadedKeys.keys as Record<Direction, string>,
 		};
-		this.log("settings-loaded", { settings: this.settings, repaired: loadedKeys.repaired });
-		if (loadedKeys.repaired) {
-			console.warn("[CanvasKeyboardPan] invalid or duplicate key bindings detected; restoring default WASD", data?.keys);
+		if (loadedKeys.repaired || speedRepaired) {
 			await this.saveData(this.settings);
-			new Notice("Canvas Keyboard Pan：检测到重复按键配置，已恢复默认 WASD");
+			new Notice(
+				loadedKeys.repaired
+					? "Canvas Keyboard Pan：检测到重复按键配置，已恢复默认 WASD"
+					: "Canvas Keyboard Pan：速度配置超出范围，已恢复到有效范围",
+			);
 		}
 		this.addSettingTab(new CanvasKeyboardPanSettingsTab(this.app, this));
 		this.registerCanvasKeyListeners();
@@ -97,7 +98,6 @@ export class CanvasKeyboardPan extends Plugin {
 	private createWindowState(): PanWindowState {
 		return {
 			panStart: null,
-			debugFirstTickLogged: false,
 			keyDown: {
 				[Direction.North]: false,
 				[Direction.West]: false,
@@ -111,7 +111,6 @@ export class CanvasKeyboardPan extends Plugin {
 		const registerForWindow = (eventWindow: Window | null): void => {
 			if (!eventWindow) return;
 			if (!this.registeredWindows.claim(eventWindow)) {
-				this.log("register-window-skipped-duplicate", this.describeWindow(eventWindow));
 				return;
 			}
 
@@ -120,41 +119,29 @@ export class CanvasKeyboardPan extends Plugin {
 
 			const state = this.createWindowState();
 			this.windowStates.set(eventWindow, state);
-			this.log("register-window", this.describeWindow(eventWindow));
 
 			const onKeyDown = (event: KeyboardEvent): void => {
-				this.log("keydown", {
-					window: this.describeWindow(eventWindow), key: event.key, code: event.code,
-					shift: event.shiftKey, ctrl: event.ctrlKey, alt: event.altKey, meta: event.metaKey,
-					repeat: event.repeat, target: this.describeTarget(event.target),
-				});
 				if (hasKeyboardModifier(event)) {
-					this.log("keydown-blocked-modifier", { window: this.describeWindow(eventWindow), key: event.key, code: event.code });
 					this.stopPan(eventWindow, true);
 					return;
 				}
 				if (event.repeat || event.isComposing || isEditableTarget(event.target)) {
-					this.log("keydown-blocked-input-state", { repeat: event.repeat, composing: event.isComposing, editable: isEditableTarget(event.target) });
 					return;
 				}
 
 				const canvas = getCanvasFromEvent(this.app, event, eventWindow);
 				if (!canvas) {
-					this.log("keydown-ignored-no-canvas", { window: this.describeWindow(eventWindow) });
 					return;
 				}
 				if (isCanvasEditing(canvas)) {
-					this.log("keydown-blocked-canvas-editing", { window: this.describeWindow(eventWindow) });
 					return;
 				}
 				if (!this.handledKeyboardEvents.consume(event)) {
-					this.log("keydown-ignored-duplicate-event", { window: this.describeWindow(eventWindow) });
 					return;
 				}
 
 				const direction = this.getDirectionForEvent(event);
 				if (!direction) {
-					this.log("keydown-ignored-unbound-key", { key: event.key, code: event.code, configured: this.settings.keys });
 					return;
 				}
 
@@ -162,41 +149,32 @@ export class CanvasKeyboardPan extends Plugin {
 				state.keyDown[direction] = true;
 				state.keyDown[this.getOppositeDirection(direction)] = false;
 				this.startPan(eventWindow);
-				this.log("keydown-accepted", { window: this.describeWindow(eventWindow), direction, configured: this.settings.keys[direction] });
 				event.preventDefault();
 		};
 
 			const onKeyUp = (event: KeyboardEvent): void => {
-				this.log("keyup", {
-					window: this.describeWindow(eventWindow), key: event.key, code: event.code,
-					shift: event.shiftKey, ctrl: event.ctrlKey, alt: event.altKey, meta: event.metaKey,
-				});
 				if (hasKeyboardModifier(event)) {
-					this.log("keyup-blocked-modifier", { window: this.describeWindow(eventWindow), key: event.key, code: event.code });
 					this.stopPan(eventWindow, true);
 					return;
 				}
 				if (!this.handledKeyboardEvents.consume(event)) {
-					this.log("keyup-ignored-duplicate-event", { window: this.describeWindow(eventWindow) });
 					return;
 				}
 
 				const direction = this.getDirectionForEvent(event);
 				if (!direction) {
-					this.log("keyup-ignored-unbound-key", { key: event.key, code: event.code, configured: this.settings.keys });
 					return;
 				}
 				state.keyDown[direction] = false;
 				this.stopPan(eventWindow);
 		};
 
-			const clearWindowState = (reason: string): void => {
-				this.log("clear-window-state", { reason, window: this.describeWindow(eventWindow) });
+			const clearWindowState = (): void => {
 				this.resetWindowState(eventWindow);
 			};
-			const onBlur = (): void => clearWindowState("blur");
+			const onBlur = (): void => clearWindowState();
 			const onVisibilityChange = (): void => {
-				if (eventWindow.document.visibilityState !== "visible") clearWindowState(`visibility:${eventWindow.document.visibilityState}`);
+				if (eventWindow.document.visibilityState !== "visible") clearWindowState();
 			};
 			// Register on the owning document: Obsidian popouts can expose a
 			// Window wrapper whose event path is not identical to the document
@@ -218,7 +196,6 @@ export class CanvasKeyboardPan extends Plugin {
 					delete windowWithCleanup.__obsidianCanvasKeyboardPanCleanup;
 				}
 				this.windowCleanups.delete(eventWindow);
-				this.log("cleanup-window", this.describeWindow(eventWindow));
 				this.removeWindowState(eventWindow);
 				this.registeredWindows.release(eventWindow);
 			};
@@ -234,11 +211,9 @@ export class CanvasKeyboardPan extends Plugin {
 		});
 
 		this.registerEvent(this.app.workspace.on("window-open", (_workspaceWindow, eventWindow) => {
-			this.log("workspace-window-open", this.describeWindow(eventWindow));
 			registerForWindow(eventWindow);
 		}));
 		this.registerEvent(this.app.workspace.on("window-close", (_workspaceWindow, eventWindow) => {
-			this.log("workspace-window-close", this.describeWindow(eventWindow));
 			this.windowCleanups.get(eventWindow)?.();
 		}));
 	}
@@ -251,33 +226,6 @@ export class CanvasKeyboardPan extends Plugin {
 			}
 		}
 		return undefined;
-	}
-
-	private describeWindow(eventWindow: Window): Record<string, unknown> {
-		return {
-			main: eventWindow === this.getWorkspaceWindow(),
-			url: eventWindow.location?.href,
-			visibility: eventWindow.document.visibilityState,
-			focused: eventWindow.document.hasFocus?.(),
-		};
-	}
-
-	private describeTarget(target: EventTarget | null): string {
-		if (!target) return "null";
-		const element = target as Element;
-		return element.tagName ? `${element.tagName.toLowerCase()}${element.className ? `.${String(element.className).replace(/\s+/g, ".")}` : ""}` : target.constructor?.name ?? "unknown";
-	}
-
-	private log(message: string, details?: unknown): void {
-		if (DIAGNOSTIC_LOGGING) {
-			let serialized = "";
-			try {
-				serialized = details === undefined ? "" : ` ${JSON.stringify(details)}`;
-			} catch {
-				serialized = " [unserializable-details]";
-			}
-			console.info(`[CanvasKeyboardPan] ${message}${serialized}`);
-		}
 	}
 
 	private getWindowFromLeaf(leaf: unknown): Window | undefined {
@@ -322,32 +270,25 @@ export class CanvasKeyboardPan extends Plugin {
 	public startPan(eventWindow: Window = this.getWorkspaceWindow()): void {
 		const state = this.windowStates.get(eventWindow);
 		if (!state) {
-			this.log("start-pan-skipped-no-window-state", this.describeWindow(eventWindow));
 			return;
 		}
 		if (state.panInterval !== undefined) {
-			this.log("start-pan-skipped-already-running", this.describeWindow(eventWindow));
 			return;
 		}
 
 		state.panStart = Date.now();
-		state.debugFirstTickLogged = false;
 		const interval = eventWindow.setInterval(() => this.handlePanKeys(eventWindow), PAN_INTERVAL_MS);
 		state.panInterval = this.registerInterval(interval);
-		this.log("start-pan", { window: this.describeWindow(eventWindow), interval: state.panInterval });
 	}
 
 	public stopPan(eventWindow: Window = this.getWorkspaceWindow(), force = false): void {
 		const state = this.windowStates.get(eventWindow);
 		if (!state) return;
 
-		const wasRunning = state.panInterval !== undefined;
 		if (force || !this.isPanning(state)) {
 			if (state.panInterval !== undefined) eventWindow.clearInterval(state.panInterval);
 			state.panInterval = undefined;
 			state.panStart = null;
-			state.debugFirstTickLogged = false;
-			if (wasRunning) this.log("stop-pan", { window: this.describeWindow(eventWindow), force });
 		}
 		if (force) {
 			for (const direction of Object.values(Direction)) state.keyDown[direction] = false;
@@ -403,17 +344,7 @@ export class CanvasKeyboardPan extends Plugin {
 			dx += this.getPanDistance(ms, this.settings.maxSpeed);
 		}
 
-		const before = { tx: canvas.tx, ty: canvas.ty };
 		this.pan(dx, dy, canvas);
-		if (!state.debugFirstTickLogged) {
-			state.debugFirstTickLogged = true;
-			const runtimeCanvas = canvas as Canvas & { viewportChanged?: boolean; frame?: number };
-			this.log("pan-first-tick", {
-				window: this.describeWindow(eventWindow), direction: { dx, dy },
-				before, after: { tx: canvas.tx, ty: canvas.ty },
-				viewportChanged: runtimeCanvas.viewportChanged, frame: runtimeCanvas.frame,
-			});
-		}
 	}
 
 	public pan(dx: number, dy: number, canvas = this.getActiveCanvas()): void {
@@ -421,9 +352,8 @@ export class CanvasKeyboardPan extends Plugin {
 		panCanvas(canvas, dx, dy);
 	}
 
-	public getPanDistance(msPanning = 0, max = 250): number {
-		if (msPanning < 1) return 0;
-		return Math.min((Math.log10(msPanning) * max) / 3, 250);
+	public getPanDistance(msPanning = 0, max = DEFAULT_PAN_SPEED): number {
+		return getPanDistance(msPanning, max);
 	}
 
 	public resetCanvas(): void {

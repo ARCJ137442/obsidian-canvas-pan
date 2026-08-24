@@ -7,6 +7,7 @@ import registryModule from "../.test-build/window-registration.js"
 import keyBindingsModule from "../.test-build/key-bindings.js"
 import viewportModule from "../.test-build/canvas-viewport.js"
 import util from "../.test-build/util.js"
+import panSpeed from "../.test-build/pan-speed.js"
 
 const { getCanvasFromEvent, isCanvasEditing, isEditableTarget } = context
 const { KeyboardEventGuard } = guardModule
@@ -15,6 +16,7 @@ const { WindowRegistrationRegistry } = registryModule
 const { DEFAULT_KEY_BINDINGS, normalizeKeyBindings } = keyBindingsModule
 const { panCanvas } = viewportModule
 const { xor } = util
+const { getPanDistance, normalizePanSpeed } = panSpeed
 
 test("从事件所在的 Canvas DOM 解析上下文，而不是猜 active view", () => {
 	const documentA = {}
@@ -141,7 +143,15 @@ test("方向冲突与速度函数保持原有语义", () => {
 	assert.equal(xor(true, false), true)
 	assert.equal(xor(true, true), false)
 	assert.equal(xor(false, false), false)
-	assert.equal(Math.min((Math.log10(1000) * 250) / 3, 250), 250)
+	assert.equal(getPanDistance(1000, 250), 250)
+	assert.equal(getPanDistance(1000, 500), 500)
+	assert.equal(getPanDistance(10_000, 50), 50)
+})
+
+test("速度配置会限制到有效范围并恢复非法值", () => {
+	assert.equal(normalizePanSpeed(-1), 50)
+	assert.equal(normalizePanSpeed(999), 500)
+	assert.equal(normalizePanSpeed("fast"), 250)
 })
 
 test("键位配置按顺序归一化，旧单字母可迁移，重复键会恢复默认", () => {

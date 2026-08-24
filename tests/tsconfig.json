@@ -17,6 +17,7 @@
 		"../src/key-bindings.ts",
 		"../src/canvas-viewport.ts",
 		"../src/util.ts",
+		"../src/pan-speed.ts",
 		"../src/types.ts"
 	]
 }

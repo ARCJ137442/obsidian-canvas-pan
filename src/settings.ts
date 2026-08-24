@@ -1,6 +1,7 @@
 import type { CanvasKeyboardPan, CanvasKeyboardPanSettings } from "./plugin";
 import { DEFAULT_SETTINGS, Direction } from "./plugin";
 import { Notice, PluginSettingTab, Setting, setIcon } from "obsidian";
+import { MAX_PAN_SPEED, MIN_PAN_SPEED } from "./pan-speed";
 
 import type { App } from "obsidian";
 
@@ -95,7 +96,7 @@ export class CanvasKeyboardPanSettingsTab extends PluginSettingTab {
 			.addSlider((slider) => {
 				const displayValue = createSpan({ text: this.plugin.settings.maxSpeed.toString() });
 				slider.sliderEl.parentElement?.prepend(displayValue);
-				slider.setLimits(50, 500, 10);
+				slider.setLimits(MIN_PAN_SPEED, MAX_PAN_SPEED, 10);
 				slider.setValue(this.plugin.settings.maxSpeed);
 				slider.onChange((value) => {
 					displayValue.setText(value.toString());

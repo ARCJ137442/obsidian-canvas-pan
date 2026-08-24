@@ -5,8 +5,8 @@ export function panCanvas(canvas: Canvas, dx: number, dy: number): void {
 	const zoom = (canvas.zoom ?? -4) + 5;
 	canvas.tx += dx / zoom;
 	canvas.ty += dy / zoom;
-	if (isNaN(canvas.tx)) canvas.tx = 0;
-	if (isNaN(canvas.ty)) canvas.ty = 0;
+	if (!Number.isFinite(canvas.tx)) canvas.tx = 0;
+	if (!Number.isFinite(canvas.ty)) canvas.ty = 0;
 	canvas.markViewportChanged();
 	canvas.requestFrame?.();
 }
