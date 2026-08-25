@@ -16,6 +16,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- ## Unreleased -->
 
+## [1.0.9] - 2026-08-25
+
+### Fixed
+
+- Drop `isDesktopOnly` from `manifest.json` so the plugin is installable on Obsidian Mobile (iOS / Android).
+
+## [1.0.8] - 2026-08-24
+
+### Fixed
+
+- Extract `src/pan-speed.ts` with `normalizePanSpeed` clamping and replace `isNaN` with `Number.isFinite` in `canvas-viewport.ts`, so non-finite or out-of-range `maxSpeed` values no longer propagate.
+- Load `maxSpeed` through `normalizePanSpeed` on settings hydrate; persist the repaired value and only surface a Notice when input was invalid.
+- Remove `debugFirstTickLogged` and `DIAGNOSTIC_LOGGING` debug scaffolding; key-binding and speed repairs share one Notice path with per-field wording.
+- Record 1.0.8 validation resources in `tests/resource-usage.md`.
+
 ## [1.0.7] - 2026-08-21
 
 ### Fixed

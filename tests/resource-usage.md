@@ -88,5 +88,7 @@
 | 2026-08-21 | `life-panel-pan-directional-fix-final-errors-v2` | `No errors captured` | 314.91 ms | 0 B（短 CLI 进程，可能漏采） | 0 s（短 CLI 进程，可能漏采） | 1 |
 | 2026-08-21 | `canvas-pan-1.0.7-release-build-v1` | 成功，退出码 0；短进程可能漏采内存和 CPU | 1613.19 ms | 0 B（短 CLI 进程，可能漏采） | 0 s（短 CLI 进程，可能漏采） | 1 |
 | 2026-08-21 | `canvas-pan-1.0.7-release-tests-v1` | 10/10，退出码 0 | 2254.81 ms | 307,195,904 B（292.96 MiB） | 3.703 s | 2 |
+| 2026-08-24 | `status-20260824-pan-1.0.8-build-v1` | 成功，退出码 0；短进程采样数 1，峰值可能漏采 | 1075.20 ms | 83,144,704 B（79.29 MiB） | 0.234 s | 1 |
+| 2026-08-24 | `status-20260824-pan-1.0.8-tests-v1` | 11/11，退出码 0 | 1876.34 ms | 272,310,272 B（259.70 MiB） | 1.844 s | 2 |
 
 采样器复用原插件仓库的 [`measure-command.ps1`](../../obsidian-canvas-block-reference/scripts/measure-command.ps1)。工作集和 CPU 仅代表被测命令进程树，不等同于整台机器的总资源占用；短命令可能因采样间隔漏掉瞬时峰值。
