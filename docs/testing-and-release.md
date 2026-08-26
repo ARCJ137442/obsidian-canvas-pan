@@ -45,3 +45,5 @@ Android 的关键回归序列：
 6. 再次检查 Release 工作流和资产列表；CI 未通过不算完成。
 
 GitHub Actions 使用 Node 22、`npm ci`、`npm test` 和 `npm run build`，与本地发布门禁保持一致。
+
+本仓库是上游项目的 fork；首次启用自动 CI 时需在 GitHub Actions 页面确认运行本 fork 的 workflow，或执行 `gh workflow enable build.yml`。仓库启用后，后续 `main` push 才会自动进入上述门禁。
