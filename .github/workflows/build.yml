@@ -1,5 +1,6 @@
 name: Build
 on:
+  # Fork maintenance relies on this gate before any release tag is created.
   push:
     branches: [main]
   pull_request:
