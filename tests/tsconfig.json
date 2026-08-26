@@ -11,7 +11,9 @@
 	},
 	"include": [
 		"../src/canvas-context.ts",
+		"../src/canvas-pointer-lease.ts",
 		"../src/keyboard-event-guard.ts",
+		"../src/diagnostics.ts",
 		"../src/keyboard-modifiers.ts",
 		"../src/window-registration.ts",
 		"../src/key-bindings.ts",

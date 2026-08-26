@@ -1,12 +1,12 @@
 {
 	"name": "canvas-keyboard-pan",
-	"version": "1.0.9",
+	"version": "1.0.10",
 	"description": "Pan around your canvas using the keyboard",
 	"main": "main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
 		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
-		"test": "tsc -p tests/tsconfig.json && node --test tests/canvas-pan.test.mjs",
+		"test": "tsc -p tests/tsconfig.json && node --test tests/canvas-pan.test.mjs tests/diagnostics.test.mjs",
 		"version": "node version-bump.mjs"
 	},
 	"keywords": [],
@@ -14,7 +14,7 @@
 		"name": "Nathonius",
 		"url": "https://nathan-smith.org/"
 	},
-	"license": "UNLICENSED",
+	"license": "Unlicense",
 	"devDependencies": {
 		"@eslint/js": "^9.1.1",
 		"@types/node": "^20.12.7",

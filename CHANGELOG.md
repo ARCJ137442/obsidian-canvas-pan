@@ -16,6 +16,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 <!-- ## Unreleased -->
 
+## [1.0.10] - 2026-08-26
+
+### Added
+
+- Add opt-in, bounded mobile diagnostics with Canvas capability snapshots, sampled pan effects, error capture, and an ARC diagnostic bridge.
+- Add per-window Canvas pointer leases established only by verified Canvas pointer interaction.
+
+### Fixed
+
+- Restore Android external-keyboard panning after opening and leaving Canvas node editing, while preserving editor, input, modal, composition, multi-window, and lifecycle safety boundaries.
+- Stop a failed pan interval safely and request Canvas redraws without creating a persistent telemetry loop.
+
+### Changed
+
+- Run tests and production builds on every `main` push and pull request before a release tag is created.
+- Publish a versioned plugin ZIP together with `main.js`, `manifest.json`, and `styles.css`.
+
 ## [1.0.9] - 2026-08-25
 
 ### Fixed
@@ -96,5 +113,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Initial release.
 
-[1.0.1]: https://github.com/nathonius/obsidian-github-link/compare/1.0.0...1.0.1
-[1.0.0]: https://github.com/nathonius/obsidian-github-link/releases/tag/1.0.0
+[1.0.10]: https://github.com/ARCJ137442/obsidian-canvas-pan/compare/1.0.9...1.0.10
+[1.0.9]: https://github.com/ARCJ137442/obsidian-canvas-pan/compare/1.0.8...1.0.9
+[1.0.8]: https://github.com/ARCJ137442/obsidian-canvas-pan/compare/1.0.7...1.0.8
+[1.0.7]: https://github.com/ARCJ137442/obsidian-canvas-pan/compare/1.0.6...1.0.7
+[1.0.6]: https://github.com/ARCJ137442/obsidian-canvas-pan/compare/1.0.5...1.0.6
+[1.0.5]: https://github.com/ARCJ137442/obsidian-canvas-pan/compare/1.0.4...1.0.5
+[1.0.4]: https://github.com/ARCJ137442/obsidian-canvas-pan/compare/1.0.3...1.0.4
+[1.0.3]: https://github.com/ARCJ137442/obsidian-canvas-pan/compare/1.0.2...1.0.3
+[1.0.2]: https://github.com/ARCJ137442/obsidian-canvas-pan/compare/1.0.1...1.0.2
+[1.0.1]: https://github.com/ARCJ137442/obsidian-canvas-pan/compare/1.0.0...1.0.1
+[1.0.0]: https://github.com/ARCJ137442/obsidian-canvas-pan/releases/tag/1.0.0

@@ -19,11 +19,13 @@ jobs:
           merge-multiple: true
       - name: Create Draft
         env:
-          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+          GH_TOKEN: ${{ github.token }}
         run: |
           tag="${GITHUB_REF#refs/tags/}"
+          mv canvas-keyboard-pan.zip "canvas-keyboard-pan-${tag}.zip"
 
           gh release create "$tag" \
-            --title="Release v$tag" \
+            --title="Canvas Keyboard Pan $tag" \
             --draft \
-            main.js manifest.json styles.css
+            --notes="" \
+            "canvas-keyboard-pan-${tag}.zip" main.js manifest.json styles.css
